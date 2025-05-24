@@ -1,0 +1,27 @@
+# Compiled class files
+*.class
+target/
+build/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+*.iws
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Application logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+
+# Environment variables
+.env
+application-local.properties
+application-local.yml
