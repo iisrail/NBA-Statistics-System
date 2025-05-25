@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service;
 
 import com.nba.stats.dto.LiveStatDto;
 import com.nba.stats.dto.PlayerStatsDelta;
-import com.nba.stats.repository.PlayerStatsRepository;
+import com.nba.stats.repository.DbStatsRepository;
 import com.nba.stats.repository.RedisStatsRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -16,13 +16,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class LiveStatServiceImpl implements LiveStatService {
 
-    private final PlayerStatsRepository playerStatsRepository;
+    private final DbStatsRepository playerStatsRepository;
     private final RedisStatsRepository redisStatsRepository;
     private final String currentSeason;
 
     /** Constructor required because of `@Value` + final */
     public LiveStatServiceImpl(
-            PlayerStatsRepository playerStatsRepository,
+            DbStatsRepository playerStatsRepository,
             RedisStatsRepository redisStatsRepository,
             @Value("${nba.current-season}") String currentSeason) {
 
@@ -37,7 +37,7 @@ public class LiveStatServiceImpl implements LiveStatService {
         PlayerStatsDelta delta = updatePlayerStats(liveStat);
 
         // Step 2: Update team stats using the same delta
-        updateTeamStats(liveStat.getTeamId(), delta);
+        updateTeamStats(liveStat.getTeamId(), delta, liveStat.getGameId());
         
         log.info("Processed live stat for player {} in game {}", liveStat.getPlayerId(), liveStat.getGameId());
     }
@@ -49,7 +49,8 @@ public class LiveStatServiceImpl implements LiveStatService {
         String seasonKey = getPlayerSeasonKey(liveStat.getPlayerId());
         String gameKey = getPlayerGameKey(liveStat.getPlayerId(), liveStat.getGameId());
 
-        // Ensure season stats are loaded in Redis
+        // Ensure season stats are loaded in Redis, 
+        // and if not retrieve from DB and load to Redis        
         ensurePlayerSeasonStatsLoaded(seasonKey, liveStat.getPlayerId());
 
         // Get previous game stats for delta calculation
@@ -68,16 +69,41 @@ public class LiveStatServiceImpl implements LiveStatService {
     }
 
     /**
-     * Update team statistics using player delta
+     * Update team statistics using player delta with proper game counting
      */
-    private void updateTeamStats(int teamId, PlayerStatsDelta delta) {
+    private void updateTeamStats(int teamId, PlayerStatsDelta delta, int gameId) {
         String teamSeasonKey = getTeamSeasonKey(teamId);
+        String teamGameKey = "team_game:" + teamId + ":" + gameId;
 
         // Ensure team stats are loaded in Redis
         ensureTeamSeasonStatsLoaded(teamSeasonKey, teamId);
 
-        // Update team aggregates with same delta
-        redisStatsRepository.updateSeasonAggregates(teamSeasonKey, delta);
+        // Check if this is the first player processed for this team in this game
+        boolean isFirstPlayerInGame = !redisStatsRepository.seasonStatsExist(teamGameKey);
+
+        // Create team delta
+        PlayerStatsDelta teamDelta = new PlayerStatsDelta(
+            delta.getPoints(),
+            delta.getRebounds(),
+            delta.getAssists(),
+            delta.getSteals(),
+            delta.getBlocks(),
+            delta.getFouls(),
+            delta.getTurnovers(),
+            delta.getMinutesPlayed(),
+            isFirstPlayerInGame ? 1 : 0  //Only count game once per team
+        );
+
+        // Update team aggregates
+        redisStatsRepository.updateSeasonAggregates(teamSeasonKey, teamDelta);
+
+        // Mark this team-game combination as processed
+        if (isFirstPlayerInGame) {
+        	redisStatsRepository.markTeamGameProcessed(teamId, gameId);
+            log.debug("First player processed for team {} in game {} - incremented team games", teamId, gameId);
+        } else {
+            log.debug("Additional player processed for team {} in game {} - no game increment", teamId, gameId);
+        }
     }
 
     /**
@@ -104,7 +130,7 @@ public class LiveStatServiceImpl implements LiveStatService {
     }
 
     /**
-     * Calculate delta between previous and current stats (FIXED: All 8 fields)
+     * Calculate delta between previous and current stats 
      */
     private PlayerStatsDelta calculateDelta(LiveStatDto previous, LiveStatDto current) {
         if (previous == null) {
@@ -113,11 +139,12 @@ public class LiveStatServiceImpl implements LiveStatService {
                 current.getPoints(),
                 current.getRebounds(),
                 current.getAssists(),
-                current.getSteals(),        // Added
-                current.getBlocks(),       // Added
-                current.getFouls(),        // Added
-                current.getTurnovers(),    // Added
-                current.getMinutesPlayed()
+                current.getSteals(),       
+                current.getBlocks(),       
+                current.getFouls(),        
+                current.getTurnovers(),   
+                current.getMinutesPlayed(),
+                1
             );
         }
 
@@ -126,11 +153,12 @@ public class LiveStatServiceImpl implements LiveStatService {
             current.getPoints() - previous.getPoints(),
             current.getRebounds() - previous.getRebounds(),
             current.getAssists() - previous.getAssists(),
-            current.getSteals() - previous.getSteals(),           // Added
-            current.getBlocks() - previous.getBlocks(),           // Added
-            current.getFouls() - previous.getFouls(),             // Added
-            current.getTurnovers() - previous.getTurnovers(),     // Added
-            current.getMinutesPlayed().subtract(previous.getMinutesPlayed())
+            current.getSteals() - previous.getSteals(), 
+            current.getBlocks() - previous.getBlocks(), 
+            current.getFouls() - previous.getFouls(),   
+            current.getTurnovers() - previous.getTurnovers(),
+            current.getMinutesPlayed() - previous.getMinutesPlayed(),
+            0
         );
     }
 

@@ -5,12 +5,12 @@ import java.util.Map;
 public interface StatsRetrievalService {
     
     /**
-     * Get current season stats for a player
+     * Get season stats for a player
      */
-    Map<String, Object> getPlayerSeasonStats(int playerId);
+    Map<String, Object> getPlayerSeasonStats(int playerId, String season);
     
     /**
-     * Get current season stats for a team
+     * Get season stats for a team
      */
-    Map<String, Object> getTeamSeasonStats(int teamId);
+    Map<String, Object> getTeamSeasonStats(int teamId, String season);
 }

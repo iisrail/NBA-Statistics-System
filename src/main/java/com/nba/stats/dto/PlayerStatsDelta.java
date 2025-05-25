@@ -16,14 +16,9 @@ public class PlayerStatsDelta {
     int steals;
     int blocks;
     int fouls;
-    int turnovers;    
-    @Builder.Default
-    BigDecimal minutesPlayed = BigDecimal.ZERO;
-    
-	/*
-	 * public int convertMinToSeconds() {
-	 * return minutesPlayed.multiply(BigDecimal.valueOf(60)).intValue();
-	 * }
-	 */
+    int turnovers;  
+    double minutesPlayed;
+    int gamesPlayed;
+
 }
 

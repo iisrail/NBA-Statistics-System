@@ -1,36 +1,55 @@
 package com.nba.stats.service;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
-import com.nba.stats.repository.PlayerStatsRepository;
-import com.nba.stats.repository.RedisStatsRepository;
-
-import lombok.extern.slf4j.Slf4j;
-
+import java.util.HashMap;
 import java.util.Map;
 
+import org.springframework.stereotype.Service;
+
+import com.nba.stats.constants.RedisFields;
+import com.nba.stats.constants.ResponseFields;
+import com.nba.stats.repository.DbStatsRepository;
+import com.nba.stats.repository.RedisStatsRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+@RequiredArgsConstructor
 @Service
 @Slf4j
 public class StatsRetrievalServiceImpl implements StatsRetrievalService {
 
     private final RedisStatsRepository redisStatsRepository;
-    private final PlayerStatsRepository playerStatsRepository;
-    private final String currentSeason;
+    private final DbStatsRepository playerStatsRepository;
+    private final RosterService rosterService;
+    
+    private static final Map<String, Object> EMPTY_PLAYER_STATS = Map.ofEntries(
+    	    Map.entry(ResponseFields.GAMES_PLAYED, 0),
+    	    Map.entry(ResponseFields.AVG_POINTS, 0.0),
+    	    Map.entry(ResponseFields.AVG_REBOUNDS, 0.0),
+    	    Map.entry(ResponseFields.AVG_ASSISTS, 0.0),
+    	    Map.entry(ResponseFields.AVG_STEALS, 0.0),
+    	    Map.entry(ResponseFields.AVG_BLOCKS, 0.0),
+    	    Map.entry(ResponseFields.AVG_FOULS, 0.0),
+    	    Map.entry(ResponseFields.AVG_TURNOVERS, 0.0),
+    	    Map.entry(ResponseFields.AVG_MINUTES, 0.0)
+    	);
 
-    public StatsRetrievalServiceImpl(
-            RedisStatsRepository redisStatsRepository,
-            PlayerStatsRepository playerStatsRepository,
-            @Value("${nba.current-season}") String currentSeason) {
-        
-        this.redisStatsRepository = redisStatsRepository;
-        this.playerStatsRepository = playerStatsRepository;
-        this.currentSeason = currentSeason;
-    }
+    private static final Map<String, Object> EMPTY_TEAM_STATS = Map.ofEntries(  // Change to ofEntries
+    	    Map.entry(ResponseFields.GAMES_PLAYED, 0),
+    	    Map.entry(ResponseFields.AVG_POINTS, 0.0),
+    	    Map.entry(ResponseFields.AVG_REBOUNDS, 0.0),
+    	    Map.entry(ResponseFields.AVG_ASSISTS, 0.0),
+    	    Map.entry(ResponseFields.AVG_STEALS, 0.0),
+    	    Map.entry(ResponseFields.AVG_BLOCKS, 0.0),
+    	    Map.entry(ResponseFields.AVG_FOULS, 0.0),
+    	    Map.entry(ResponseFields.AVG_TURNOVERS, 0.0)
+    	);
 
+
+    
     @Override
-    public Map<String, Object> getPlayerSeasonStats(int playerId) {
-        String seasonKey = getPlayerSeasonKey(playerId);
+    public Map<String, Object> getPlayerSeasonStats(int playerId, String season) {
+    	log.info("TEST: Received season parameter: '{}'", season);
+        String seasonKey = getRosterSeasonKey(playerId, season, ResponseFields.PLATER_TYPE);//s:2024_25:p:2
         
         // Try Redis first (hot path)
         Map<String, Object> stats = redisStatsRepository.getSeasonStats(seasonKey);
@@ -38,7 +57,7 @@ public class StatsRetrievalServiceImpl implements StatsRetrievalService {
         if (stats == null) {
             // Fallback to database and load into Redis
             log.debug("Stats not in Redis, loading from DB for player {}", playerId);
-            stats = playerStatsRepository.getPlayerSeasonStats(playerId, currentSeason);
+            stats = playerStatsRepository.getPlayerSeasonStats(playerId, season);
             
             if (stats != null && !stats.isEmpty()) {
                 redisStatsRepository.storeSeasonStats(seasonKey, stats);
@@ -46,12 +65,13 @@ public class StatsRetrievalServiceImpl implements StatsRetrievalService {
         }
         
         // Calculate averages for response
-        return calculatePlayerAverages(stats);
+        return calculatePlayerAverages(stats,playerId);
     }
 
     @Override
-    public Map<String, Object> getTeamSeasonStats(int teamId) {
-        String seasonKey = getTeamSeasonKey(teamId);
+    public Map<String, Object> getTeamSeasonStats(int teamId, String season) {
+    	log.info("TEST: Received season parameter: '{}'", season);
+        String seasonKey = getRosterSeasonKey(teamId, season, ResponseFields.TEAM_TYPE);
         
         // Try Redis first
         Map<String, Object> stats = redisStatsRepository.getSeasonStats(seasonKey);
@@ -59,120 +79,80 @@ public class StatsRetrievalServiceImpl implements StatsRetrievalService {
         if (stats == null) {
             // Fallback to database
             log.debug("Stats not in Redis, loading from DB for team {}", teamId);
-            stats = playerStatsRepository.getTeamSeasonStats(teamId, currentSeason);
+            stats = playerStatsRepository.getTeamSeasonStats(teamId, season);
             
             if (stats != null && !stats.isEmpty()) {
                 redisStatsRepository.storeSeasonStats(seasonKey, stats);
             }
         }
         
-        return calculateTeamAverages(stats);
+        return calculateTeamAverages(stats,teamId);
     }
 
     /**
      * Calculate per-game averages for player stats
      */
-    private Map<String, Object> calculatePlayerAverages(Map<String, Object> stats) {
+    private Map<String, Object> calculatePlayerAverages(Map<String, Object> stats, int playerId) {
+    	log.info("TEST DEBUG - Retrieved stats: {}", stats); 
+    	log.info("TEST DEBUG - games_played value: {}", stats.get(RedisFields.GAMES_PLAYED));
         if (stats == null || stats.isEmpty()) {
-            return Map.of(
-                "playerId", 0,
-                "gamesPlayed", 0,
-                "avgPoints", 0.0,
-                "avgRebounds", 0.0,
-                "avgAssists", 0.0,
-                "avgSteals", 0.0,
-                "avgBlocks", 0.0,
-                "avgFouls", 0.0,
-                "avgTurnovers", 0.0,
-                "avgMinutes", 0.0
-            );
+        	Map<String, Object> emptyStats = new HashMap<>(EMPTY_PLAYER_STATS);
+            emptyStats.put(ResponseFields.PLAYER_ID, playerId);
+            emptyStats.put(ResponseFields.PLAYER_NAME, rosterService.getPlayerName(playerId));        	
+            return emptyStats;
         }
-
-        int gamesPlayed = (Integer) stats.getOrDefault("games_played", 0);
-        
-        if (gamesPlayed == 0) {
-            return Map.of(
-                "playerId", stats.getOrDefault("player_id", 0),
-                "gamesPlayed", 0,
-                "avgPoints", 0.0,
-                "avgRebounds", 0.0,
-                "avgAssists", 0.0,
-                "avgSteals", 0.0,
-                "avgBlocks", 0.0,
-                "avgFouls", 0.0,
-                "avgTurnovers", 0.0,
-                "avgMinutes", 0.0
-            );
-        }
-
-        // Convert seconds back to minutes for user response
-        double avgMinutes = convertSecondsToMinutes(stats.get("sum_seconds"), gamesPlayed);
-
-        return Map.of(
-            "playerId", stats.getOrDefault("player_id", 0),
-            "gamesPlayed", gamesPlayed,
-            "avgPoints", divide(stats.get("sum_points"), gamesPlayed),
-            "avgRebounds", divide(stats.get("sum_rebounds"), gamesPlayed),
-            "avgAssists", divide(stats.get("sum_assists"), gamesPlayed),
-            "avgSteals", divide(stats.get("sum_steals"), gamesPlayed),
-            "avgBlocks", divide(stats.get("sum_blocks"), gamesPlayed),
-            "avgFouls", divide(stats.get("sum_fouls"), gamesPlayed),
-            "avgTurnovers", divide(stats.get("sum_turnovers"), gamesPlayed),
-            "avgMinutes", avgMinutes  // Converted from seconds
-        );
+        int totalGames = (Integer) stats.getOrDefault(RedisFields.GAMES_PLAYED, 0);
+        // Check if player has a live game
+        boolean hasLiveGame = redisStatsRepository.hasLiveGame(playerId);
+        int completedGames = hasLiveGame ? totalGames - 1 : totalGames;
+        // Use completed games for average calculation
+        int divisor = Math.max(completedGames, 1);
+        log.debug("Player {}: totalGames={}, hasLiveGame={}, completedGames={}, divisor={}", 
+                playerId, totalGames, hasLiveGame, completedGames, divisor);
+        return Map.ofEntries(
+        	    Map.entry(ResponseFields.PLAYER_ID, playerId),
+        	    Map.entry(ResponseFields.PLAYER_NAME, rosterService.getPlayerName(playerId)),
+        	    Map.entry(ResponseFields.GAMES_PLAYED, totalGames),
+        	    Map.entry(ResponseFields.HAS_LIVE_GAME, hasLiveGame), // Boolean flag
+        	    Map.entry(ResponseFields.AVG_POINTS, divide(stats.get(RedisFields.SUM_POINTS), divisor)),
+        	    Map.entry(ResponseFields.AVG_REBOUNDS, divide(stats.get(RedisFields.SUM_REBOUNDS), divisor)),
+        	    Map.entry(ResponseFields.AVG_ASSISTS, divide(stats.get(RedisFields.SUM_ASSISTS), divisor)),
+        	    Map.entry(ResponseFields.AVG_STEALS, divide(stats.get(RedisFields.SUM_STEALS), divisor)),
+        	    Map.entry(ResponseFields.AVG_BLOCKS, divide(stats.get(RedisFields.SUM_BLOCKS), divisor)),
+        	    Map.entry(ResponseFields.AVG_FOULS, divide(stats.get(RedisFields.SUM_FOULS), divisor)),
+        	    Map.entry(ResponseFields.AVG_TURNOVERS, divide(stats.get(RedisFields.SUM_TURNOVERS), divisor)),
+        	    Map.entry(ResponseFields.AVG_MINUTES, divide(stats.get(RedisFields.SUM_MINUTES), divisor))
+        	);
     }
 
     /**
      * Calculate per-game averages for team stats
      */
-    private Map<String, Object> calculateTeamAverages(Map<String, Object> stats) {
+    private Map<String, Object> calculateTeamAverages(Map<String, Object> stats, int teamId) {
         if (stats == null || stats.isEmpty()) {
-            return Map.of(
-                "teamId", 0,
-                "gamesPlayed", 0,
-                "avgPoints", 0.0,
-                "avgRebounds", 0.0,
-                "avgAssists", 0.0,
-                "avgSteals", 0.0,
-                "avgBlocks", 0.0,
-                "avgFouls", 0.0,
-                "avgTurnovers", 0.0,
-                "avgMinutes", 0.0
-            );
+            Map<String, Object> emptyStats = new HashMap<>(EMPTY_TEAM_STATS);
+            emptyStats.put(ResponseFields.TEAM_ID, teamId);
+            emptyStats.put(ResponseFields.TEAM_NAME, rosterService.getTeamName(teamId));
+            return emptyStats;
         }
 
-        int gamesPlayed = (Integer) stats.getOrDefault("games_played", 0);
-        
-        if (gamesPlayed == 0) {
-            return Map.of(
-                "teamId", stats.getOrDefault("team_id", 0),
-                "gamesPlayed", 0,
-                "avgPoints", 0.0,
-                "avgRebounds", 0.0,
-                "avgAssists", 0.0,
-                "avgSteals", 0.0,
-                "avgBlocks", 0.0,
-                "avgFouls", 0.0,
-                "avgTurnovers", 0.0,
-                "avgMinutes", 0.0
-            );
-        }
+        int totalGames = (Integer) stats.getOrDefault(RedisFields.GAMES_PLAYED, 0);
+        int completedGames = totalGames - 1;  // Subtract current live game
+        // Use completedGames for average if > 0, otherwise use totalGames
+        int divisor = completedGames > 0 ? completedGames : totalGames;
 
-        // Convert seconds back to minutes for user response
-        double avgMinutes = convertSecondsToMinutes(stats.get("sum_seconds"), gamesPlayed);
-
-        return Map.of(
-            "teamId", stats.getOrDefault("team_id", 0),
-            "gamesPlayed", gamesPlayed,
-            "avgPoints", divide(stats.get("sum_points"), gamesPlayed),
-            "avgRebounds", divide(stats.get("sum_rebounds"), gamesPlayed),
-            "avgAssists", divide(stats.get("sum_assists"), gamesPlayed),
-            "avgSteals", divide(stats.get("sum_steals"), gamesPlayed),
-            "avgBlocks", divide(stats.get("sum_blocks"), gamesPlayed),
-            "avgFouls", divide(stats.get("sum_fouls"), gamesPlayed),
-            "avgTurnovers", divide(stats.get("sum_turnovers"), gamesPlayed),
-            "avgMinutes", avgMinutes  // Converted from seconds
-        );
+        return Map.ofEntries(
+        	    Map.entry(ResponseFields.TEAM_ID, teamId),
+        	    Map.entry(ResponseFields.TEAM_NAME, rosterService.getTeamName(teamId)),
+        	    Map.entry(ResponseFields.GAMES_PLAYED, totalGames),
+        	    Map.entry(ResponseFields.AVG_POINTS, divide(stats.get(RedisFields.SUM_POINTS), divisor)),
+        	    Map.entry(ResponseFields.AVG_REBOUNDS, divide(stats.get(RedisFields.SUM_REBOUNDS), divisor)),
+        	    Map.entry(ResponseFields.AVG_ASSISTS, divide(stats.get(RedisFields.SUM_ASSISTS), divisor)),
+        	    Map.entry(ResponseFields.AVG_STEALS, divide(stats.get(RedisFields.SUM_STEALS), divisor)),
+        	    Map.entry(ResponseFields.AVG_BLOCKS, divide(stats.get(RedisFields.SUM_BLOCKS), divisor)),
+        	    Map.entry(ResponseFields.AVG_FOULS, divide(stats.get(RedisFields.SUM_FOULS), divisor)),
+        	    Map.entry(ResponseFields.AVG_TURNOVERS, divide(stats.get(RedisFields.SUM_TURNOVERS), divisor))
+        	);
     }
 
     /**
@@ -190,33 +170,12 @@ public class StatsRetrievalServiceImpl implements StatsRetrievalService {
         return 0.0;
     }
 
-    /**
-     * Convert total seconds to average minutes per game
-     */
-    private double convertSecondsToMinutes(Object totalSeconds, int gamesPlayed) {
-        if (totalSeconds == null || gamesPlayed == 0) {
-            return 0.0;
-        }
-        
-        if (totalSeconds instanceof Number num) {
-            double avgSeconds = num.doubleValue() / gamesPlayed;
-            return Math.round((avgSeconds / 60.0) * 10.0) / 10.0;  // Round to 1 decimal place
-        }
-        
-        return 0.0;
-    }
 
     /**
-     * Generate Redis key for player season stats
+     * Generate Redis key for roaster member season stats
      */
-    private String getPlayerSeasonKey(int playerId) {
-        return "s:%s:p:%d".formatted(currentSeason.replace('/', '_'), playerId);
+    private String getRosterSeasonKey(int id, String season, String type) {
+        return "s:%s:%s:%d".formatted(season.replace('/', '_'),type, id);
     }
 
-    /**
-     * Generate Redis key for team season stats
-     */
-    private String getTeamSeasonKey(int teamId) {
-        return "s:%s:t:%d".formatted(currentSeason.replace('/', '_'), teamId);
-    }
 }

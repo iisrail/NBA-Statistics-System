@@ -24,7 +24,6 @@ public class LiveStatDto{
 	    int blocks;
 	    @Min(0) @Max(6) int fouls;      // NBA rule: max 6 fouls
 	    int turnovers;	    
-	    @Builder.Default
 	    @DecimalMin("0.0") @DecimalMax("48.0") 
-	    BigDecimal minutesPlayed = BigDecimal.ZERO;
+	    double minutesPlayed;
 	}
