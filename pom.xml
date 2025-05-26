@@ -78,12 +78,7 @@
 	        <artifactId>spring-boot-starter-test</artifactId>
 	        <scope>test</scope>
 	    </dependency>
-	    
-	    <!-- Spring Boot Web Test (includes MockMvc) -->
-	    <dependency>
-	        <groupId>org.springframework.boot</groupId>
-	        <artifactId>spring-boot-starter-web</artifactId>
-	    </dependency>
+ 
 	    
 	    <!-- TestContainers -->
 	    <dependency>
@@ -110,7 +105,12 @@
 		    <artifactId>h2</artifactId>
 		    <scope>test</scope>
 		</dependency>	    
-    
+		 <dependency>
+		    <groupId>it.ozimov</groupId>
+		    <artifactId>embedded-redis</artifactId>
+		    <version>0.7.3</version>
+		    <scope>test</scope>
+		</dependency>   
 	</dependencies>
 	
 	<!-- TestContainers BOM for version management -->

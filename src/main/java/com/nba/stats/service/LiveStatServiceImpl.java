@@ -61,7 +61,6 @@ public class LiveStatServiceImpl implements LiveStatService {
 
         // Update season aggregates with delta
         redisStatsRepository.updateSeasonAggregates(seasonKey, delta);
-
         // Store current game stats for next delta calculation
         redisStatsRepository.storeCurrentGameStats(gameKey, liveStat);
 
@@ -96,7 +95,6 @@ public class LiveStatServiceImpl implements LiveStatService {
 
         // Update team aggregates
         redisStatsRepository.updateSeasonAggregates(teamSeasonKey, teamDelta);
-
         // Mark this team-game combination as processed
         if (isFirstPlayerInGame) {
         	redisStatsRepository.markTeamGameProcessed(teamId, gameId);

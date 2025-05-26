@@ -17,12 +17,12 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class IngestStatController {
-
-	private final LiveStatService service;
+	private final LiveStatService service;	
 
 	@PutMapping("/game")
 	public void putLiveStat(@Valid @RequestBody LiveStatDto stat) {
 	    log.info("Processing live stat for player {} in game {}", stat.getPlayerId(), stat.getGameId());
 	    service.processLiveStat(stat);
-	}
+	}	
+		
 }

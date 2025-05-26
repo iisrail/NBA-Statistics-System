@@ -1,9 +1,10 @@
 package com.nba.stats.repository;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+
+import com.nba.stats.util.RedisValueConverter;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,7 +24,7 @@ public class DbStatsRepository {
 	public Map<String, Object> getPlayerSeasonStats(int playerId, String season) {		
 		String sql = """
 			SELECT player_id, season, games_played, sum_points, sum_rebounds, sum_assists, sum_steals, sum_blocks, sum_fouls, sum_turnovers, sum_minutes, updated_at
-			FROM public.stat_player_sum
+			FROM stat_player_sum
 			WHERE player_id = ? and season = ?
 		""";
 
@@ -42,8 +43,8 @@ public class DbStatsRepository {
 	public Map<String, Object> getTeamSeasonStats(int teamId, String season) {		
 		String sql = """
 			SELECT team_id, season, games_played, sum_points, sum_rebounds, sum_assists, sum_steals, sum_blocks, sum_fouls, sum_turnovers, sum_minutes, updated_at
-			FROM public.stat_team_sum
-			WHERE team_id = ?  and season = ?
+			FROM stat_team_sum
+			WHERE team_id = ? and season = ?
 		""";
 
 		List<Map<String, Object>> results = jdbcTemplate.queryForList(sql, teamId, season);
@@ -59,118 +60,82 @@ public class DbStatsRepository {
 	 * Upsert player season stats (INSERT or UPDATE if exists)
 	 */
 	public void upsertPlayerSeasonStats(int playerId, String season, Map<String, Object> stats) {
-	    String sql = """
-	        INSERT INTO stat_player_sum 
-	        (player_id, season, games_played, sum_points, sum_rebounds, sum_assists, 
-	         sum_steals, sum_blocks, sum_fouls, sum_turnovers, sum_minutes, updated_at)
-	        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-	        ON CONFLICT (player_id, season) 
-	        DO UPDATE SET
-	            games_played = EXCLUDED.games_played,
-	            sum_points = EXCLUDED.sum_points,
-	            sum_rebounds = EXCLUDED.sum_rebounds,
-	            sum_assists = EXCLUDED.sum_assists,
-	            sum_steals = EXCLUDED.sum_steals,
-	            sum_blocks = EXCLUDED.sum_blocks,
-	            sum_fouls = EXCLUDED.sum_fouls,
-	            sum_turnovers = EXCLUDED.sum_turnovers,
-	            sum_minutes = EXCLUDED.sum_minutes,
-	            updated_at = CURRENT_TIMESTAMP
-	        """;
+		String sql = """
+			INSERT INTO stat_player_sum 
+			(player_id, season, games_played, sum_points, sum_rebounds, sum_assists, 
+			 sum_steals, sum_blocks, sum_fouls, sum_turnovers, sum_minutes, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			ON CONFLICT (player_id, season) 
+			DO UPDATE SET
+				games_played = EXCLUDED.games_played,
+				sum_points = EXCLUDED.sum_points,
+				sum_rebounds = EXCLUDED.sum_rebounds,
+				sum_assists = EXCLUDED.sum_assists,
+				sum_steals = EXCLUDED.sum_steals,
+				sum_blocks = EXCLUDED.sum_blocks,
+				sum_fouls = EXCLUDED.sum_fouls,
+				sum_turnovers = EXCLUDED.sum_turnovers,
+				sum_minutes = EXCLUDED.sum_minutes,
+				updated_at = CURRENT_TIMESTAMP
+			""";
 
-	    jdbcTemplate.update(sql,
-	        playerId, season,
-	        getIntValue(stats, "games_played"),
-	        getIntValue(stats, "sum_points"),
-	        getIntValue(stats, "sum_rebounds"),
-	        getIntValue(stats, "sum_assists"),
-	        getIntValue(stats, "sum_steals"),
-	        getIntValue(stats, "sum_blocks"),
-	        getIntValue(stats, "sum_fouls"),
-	        getIntValue(stats, "sum_turnovers"),
-	        getDoubleValue(stats, "sum_minutes")
-	    );
+		jdbcTemplate.update(sql,
+			playerId, season,
+			RedisValueConverter.getIntFromStatsMap(stats, "games_played"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_points"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_rebounds"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_assists"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_steals"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_blocks"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_fouls"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_turnovers"),
+			RedisValueConverter.getDoubleFromStatsMap(stats, "sum_minutes")
+		);
 
-	    log.debug("Upserted player {} season {} stats to database", playerId, season);
+		log.debug("Upserted player {} season {} stats to database", playerId, season);
 	}
 
 	/**
 	 * Upsert team season stats (INSERT or UPDATE if exists)
 	 */
 	public void upsertTeamSeasonStats(int teamId, String season, Map<String, Object> stats) {
-	    String sql = """
-	        INSERT INTO stat_team_sum 
-	        (team_id, season, games_played, sum_points, sum_rebounds, sum_assists,
-	         sum_steals, sum_blocks, sum_fouls, sum_turnovers, sum_minutes, updated_at)
-	        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-	        ON CONFLICT (team_id, season)
-	        DO UPDATE SET
-	            games_played = EXCLUDED.games_played,
-	            sum_points = EXCLUDED.sum_points,
-	            sum_rebounds = EXCLUDED.sum_rebounds,
-	            sum_assists = EXCLUDED.sum_assists,
-	            sum_steals = EXCLUDED.sum_steals,
-	            sum_blocks = EXCLUDED.sum_blocks,
-	            sum_fouls = EXCLUDED.sum_fouls,
-	            sum_turnovers = EXCLUDED.sum_turnovers,
-	            sum_minutes = EXCLUDED.sum_minutes,
-	            updated_at = CURRENT_TIMESTAMP
-	        """;
+		String sql = """
+			INSERT INTO stat_team_sum 
+			(team_id, season, games_played, sum_points, sum_rebounds, sum_assists,
+			 sum_steals, sum_blocks, sum_fouls, sum_turnovers, sum_minutes, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			ON CONFLICT (team_id, season)
+			DO UPDATE SET
+				games_played = EXCLUDED.games_played,
+				sum_points = EXCLUDED.sum_points,
+				sum_rebounds = EXCLUDED.sum_rebounds,
+				sum_assists = EXCLUDED.sum_assists,
+				sum_steals = EXCLUDED.sum_steals,
+				sum_blocks = EXCLUDED.sum_blocks,
+				sum_fouls = EXCLUDED.sum_fouls,
+				sum_turnovers = EXCLUDED.sum_turnovers,
+				sum_minutes = EXCLUDED.sum_minutes,
+				updated_at = CURRENT_TIMESTAMP
+			""";
 
-	    jdbcTemplate.update(sql,
-	        teamId, season,
-	        getIntValue(stats, "games_played"),
-	        getIntValue(stats, "sum_points"),
-	        getIntValue(stats, "sum_rebounds"),
-	        getIntValue(stats, "sum_assists"),
-	        getIntValue(stats, "sum_steals"),
-	        getIntValue(stats, "sum_blocks"),
-	        getIntValue(stats, "sum_fouls"),
-	        getIntValue(stats, "sum_turnovers"),
-	        getDoubleValue(stats, "sum_minutes")
-	    );
+		jdbcTemplate.update(sql,
+			teamId, season,
+			RedisValueConverter.getIntFromStatsMap(stats, "games_played"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_points"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_rebounds"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_assists"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_steals"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_blocks"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_fouls"),
+			RedisValueConverter.getIntFromStatsMap(stats, "sum_turnovers"),
+			RedisValueConverter.getDoubleFromStatsMap(stats, "sum_minutes")
+		);
 
-	    log.debug("Upserted team {} season {} stats to database", teamId, season);
+		log.debug("Upserted team {} season {} stats to database", teamId, season);
 	}
 
 	/**
-	 * Helper method to safely get integer values from Redis stats
-	 */
-	private int getIntValue(Map<String, Object> stats, String key) {
-	    Object value = stats.get(key);
-	    if (value instanceof Number num) {
-	        return num.intValue();
-	    }
-	    if (value instanceof String str) {
-	        try {
-	            return Integer.parseInt(str);
-	        } catch (NumberFormatException e) {
-	            return 0;
-	        }
-	    }
-	    return 0;
-	}
-
-	/**
-	 * Helper method to safely get double values from Redis stats
-	 */
-	private double getDoubleValue(Map<String, Object> stats, String key) {
-	    Object value = stats.get(key);
-	    if (value instanceof Number num) {
-	        return num.doubleValue();
-	    }
-	    if (value instanceof String str) {
-	        try {
-	            return Double.parseDouble(str);
-	        } catch (NumberFormatException e) {
-	            return 0.0;
-	        }
-	    }
-	    return 0.0;
-	}	
-
-	/**
-	 * Create empty stats map for new player
+	 * Create empty stats map for new player - with all fields
 	 */
 	private Map<String, Object> createEmptyPlayerStats() {
 		Map<String, Object> stats = new HashMap<>();
@@ -178,12 +143,16 @@ public class DbStatsRepository {
 		stats.put("sum_points", 0);
 		stats.put("sum_rebounds", 0);
 		stats.put("sum_assists", 0);
+		stats.put("sum_steals", 0);
+		stats.put("sum_blocks", 0);
+		stats.put("sum_fouls", 0);
+		stats.put("sum_turnovers", 0);
 		stats.put("sum_minutes", 0.0);
 		return stats;
 	}
 
 	/**
-	 * Create empty stats map for new team
+	 * Create empty stats map for new team - with all fields
 	 */
 	private Map<String, Object> createEmptyTeamStats() {
 		Map<String, Object> stats = new HashMap<>();
@@ -191,6 +160,10 @@ public class DbStatsRepository {
 		stats.put("sum_points", 0);
 		stats.put("sum_rebounds", 0);
 		stats.put("sum_assists", 0);
+		stats.put("sum_steals", 0);
+		stats.put("sum_blocks", 0);
+		stats.put("sum_fouls", 0);
+		stats.put("sum_turnovers", 0);
 		stats.put("sum_minutes", 0.0);
 		return stats;
 	}

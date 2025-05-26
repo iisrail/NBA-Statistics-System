@@ -1,0 +1,96 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: nba-stats-db
+    environment:
+      POSTGRES_DB: nba_stats
+      POSTGRES_USER: nba_user
+      POSTGRES_PASSWORD: nba_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - nba-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nba_user -d nba_stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: nba-stats-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - nba-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: redis-server --appendonly yes
+
+  # NBA Stats Application
+  nba-stats-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nba-stats-api
+    environment:
+      # Database Configuration
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/nba_stats
+      SPRING_DATASOURCE_USERNAME: nba_user
+      SPRING_DATASOURCE_PASSWORD: nba_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      
+      # Redis Configuration
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_TIMEOUT: 2000ms
+      
+      # Database Connection Pool
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: 20
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: 5
+      
+      # NBA Stats Configuration
+      NBA_CURRENT_SEASON: "2024/25"
+      NBA_SYNC_INTERVAL_MS: 60000
+      
+      # Logging
+      LOGGING_LEVEL_COM_NBA_STATS: INFO
+      LOGGING_LEVEL_ROOT: WARN
+      
+      # Server Configuration
+      SERVER_PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - nba-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  nba-network:
+    driver: bridge
