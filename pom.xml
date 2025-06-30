@@ -92,7 +92,6 @@
 	        <artifactId>postgresql</artifactId>
 	        <scope>test</scope>
 	    </dependency>
-	        <!-- Generic Container (for Redis) -->
 
 	    <dependency>
 	        <groupId>org.testcontainers</groupId>

@@ -3,10 +3,12 @@ package com.nba.stats.service;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import com.nba.stats.dto.LiveStatDto;
 import com.nba.stats.dto.PlayerStatsDelta;
+import com.nba.stats.event.FirstPlayerStatEvent;
 import com.nba.stats.repository.DbStatsRepository;
 import com.nba.stats.repository.RedisStatsRepository;
 
@@ -18,16 +20,19 @@ public class LiveStatServiceImpl implements LiveStatService {
 
     private final DbStatsRepository playerStatsRepository;
     private final RedisStatsRepository redisStatsRepository;
+    private final ApplicationEventPublisher eventPublisher; // Spring event publisher
     private final String currentSeason;
 
     /** Constructor required because of `@Value` + final */
     public LiveStatServiceImpl(
             DbStatsRepository playerStatsRepository,
             RedisStatsRepository redisStatsRepository,
+            ApplicationEventPublisher eventPublisher,
             @Value("${nba.current-season}") String currentSeason) {
 
         this.playerStatsRepository = playerStatsRepository;
         this.redisStatsRepository = redisStatsRepository;
+        this.eventPublisher = eventPublisher;
         this.currentSeason = currentSeason; // final now safe
     }
 
@@ -49,12 +54,22 @@ public class LiveStatServiceImpl implements LiveStatService {
         String seasonKey = getPlayerSeasonKey(liveStat.getPlayerId());
         String gameKey = getPlayerGameKey(liveStat.getPlayerId(), liveStat.getGameId());
 
-        // Ensure season stats are loaded in Redis, 
-        // and if not retrieve from DB and load to Redis        
+       
         ensurePlayerSeasonStatsLoaded(seasonKey, liveStat.getPlayerId());
 
         // Get previous game stats for delta calculation
         LiveStatDto previousStats = redisStatsRepository.getPreviousGameStats(gameKey);
+        
+     // Publish event if this is first stat for this player in this game
+        if (previousStats == null) {
+            eventPublisher.publishEvent(new FirstPlayerStatEvent(
+                liveStat.getPlayerId(), 
+                liveStat.getGameId()
+            ));
+            log.debug("Published FirstPlayerStatEvent for player {} in game {}", 
+                     liveStat.getPlayerId(), liveStat.getGameId());
+        }
+        
 
         // Calculate delta
         PlayerStatsDelta delta = calculateDelta(previousStats, liveStat);
@@ -99,13 +114,11 @@ public class LiveStatServiceImpl implements LiveStatService {
         if (isFirstPlayerInGame) {
         	redisStatsRepository.markTeamGameProcessed(teamId, gameId);
             log.debug("First player processed for team {} in game {} - incremented team games", teamId, gameId);
-        } else {
-            log.debug("Additional player processed for team {} in game {} - no game increment", teamId, gameId);
-        }
+        } 
     }
 
     /**
-     * Ensure player season stats are loaded in Redis
+     *  Ensure season stats are loaded in Redis, and if not retrieve from DB and load to Redis 
      */
     private void ensurePlayerSeasonStatsLoaded(String seasonKey, int playerId) {
         if (!redisStatsRepository.seasonStatsExist(seasonKey)) {
